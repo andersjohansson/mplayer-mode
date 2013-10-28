@@ -289,6 +289,24 @@ into the buffer."
   ;; (message "Seeking to position: %n" position)
     (mplayer--send (format "seek %d 2" position)))
 
+(defun mplayer-seek-timestamp ()
+  "Seek to the time specified by the closest (backwards) timestamp. This requires timestamps to contain a string like %H:%M:%S.
+This means brackets etc. can be added to the standard format but not much more"
+  ;;Doing the reverse of format-time-string is very complicated, we
+  ;;have to make assumptions
+  (interactive)
+  (if (string-match "%H:%M:%S" mplayer-timestamp-format)
+      (let (hour min sec position)
+        (save-excursion
+          (re-search-backward "\\([0-9][0-9]\\):\\([0-9][0-9]\\):\\([0-9][0-9]\\)")
+          (setq hour (string-to-number (match-string 1)))
+          (setq min (string-to-number (match-string 2)))
+          (setq sec (string-to-number (match-string 3)))
+          (setq position (+ sec (* 60 min) (* 3600 hour)))
+          (message "Going to timestamp position: %02d:%02d:%02d = %d" hour min sec position)
+          (mplayer-seek-position position)))
+    (message "Timestamp format does not contain %%H:%%M:%%S")))
+
 (defun mplayer-quit-mplayer ()
   "Quit mplayer and exit this mode."
   (interactive)
@@ -334,6 +352,7 @@ into the buffer."
   (define-key map (kbd "s")       'mplayer-slower)
   (define-key map (kbd "r")       'mplayer-reset-speed)
   (define-key map (kbd "p")       'mplayer-seek-position)
+  (define-key map (kbd "g")       'mplayer-seek-timestamp)
   (define-key map (kbd "t")       'mplayer-insert-position)
   (define-key map (kbd "d")       'mplayer-toggle-osd)
   (define-key map (kbd "i")       'mplayer-insert-timestamp)
