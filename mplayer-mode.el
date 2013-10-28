@@ -349,13 +349,13 @@ This means brackets etc. can be added to the standard format but not much more"
             (time (mplayer--get-time))
             (speed (mplayer--get-speed)))
         (if file
-            (add-file-local-variable-prop-line 'mplayer-file file)
+            (add-file-local-variable 'mplayer-file file)
           (message "Couldn't save filename."))
         (if time
-            (add-file-local-variable-prop-line 'mplayer-position (string-to-number time))
+            (add-file-local-variable 'mplayer-position (string-to-number time))
           (message "Couldn't save playback position."))
         (if speed
-            (add-file-local-variable-prop-line 'mplayer-playback-speed (string-to-number speed))
+            (add-file-local-variable 'mplayer-playback-speed (string-to-number speed))
           (message "Couldn't save playback speed."))
         (hack-local-variables))))
   (mplayer--send "quit")
