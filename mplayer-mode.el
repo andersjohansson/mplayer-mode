@@ -141,9 +141,9 @@ can be an integer or a string."
        (lambda (process output)
          (string-match "^ANS_TIME_POSITION=\\(.*\\)$" output)
          (setq time (match-string 1 output))
-         (set-process-filter mplayer-process nil)))
+         (set-process-filter process nil)))
       ;; Then send the command:
-      (mplayer--send "get_time_pos")
+      (mplayer--send "pausing_keep_force get_time_pos")
       (accept-process-output mplayer-process 0.3)
       time))
 
@@ -155,8 +155,8 @@ can be an integer or a string."
      (lambda (process output)
        (string-match "^ANS_path=\\(.*\\)$" output)
        (setq fn (match-string 1 output))
-       (set-process-filter mplayer-process nil)))
-    (mplayer--send "get_property path")
+       (set-process-filter process nil)))
+    (mplayer--send "pausing_keep_force get_property path")
     (accept-process-output mplayer-process 0.3)
     (if (file-exists-p fn)
         (if (string-match "\\.\\./" (file-relative-name fn)) ;if file is above current dir
@@ -172,8 +172,8 @@ can be an integer or a string."
      (lambda (process output)
        (string-match "^ANS_speed=\\(.*\\)$" output)
        (setq speed (match-string 1 output))
-       (set-process-filter mplayer-process nil)))
-    (mplayer--send "get_property speed")
+       (set-process-filter process nil)))
+    (mplayer--send "pausing_keep_force get_property speed")
     (accept-process-output mplayer-process 0.3)
     (if (= 0 (string-to-number (if (stringp speed) speed "0")))
         nil
