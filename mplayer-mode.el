@@ -80,6 +80,11 @@
   :type 'integer
   :group 'mplayer)
 
+(defcustom mplayer-resume-rewind 10
+  "The number of seconds before previous position that playback will start when resuming a saved session."
+  :type 'integer
+  :group 'mplayer)
+
 (defcustom mplayer-osd-level 3
   "OSD level used by mplayer.  3 (the default) means position/length."
   :type 'integer
@@ -89,6 +94,13 @@
   "Format used for inserting timestamps."
   :type 'string
   :group 'mplayer)
+
+(defvar mplayer-file "" "File local variable intended to store the media file for mplayer-mode between sessions.")
+(put 'mplayer-file 'safe-local-variable 'file-readable-p)
+(defvar mplayer-position 0 "File local variable intended to store the position in `mplayer-file' between sessions.")
+(put 'mplayer-position 'safe-local-variable 'numberp)
+(defvar mplayer-playback-speed 1 "File local variable intended to store the playback speed of `mplayer-file' between sessions.")
+(put 'mplayer-playback-speed 'safe-local-variable 'numberp)
 
 
 ;;; Utilities:
@@ -120,7 +132,71 @@ can be an integer or a string."
   (message "time to format: %s" time)
   (format-time-string mplayer-timestamp-format `(0 ,time 0) t))
 
+(defun mplayer--get-time ()
+  "Return time in seconds."
+    (let (time)
+      (set-process-filter
+       mplayer-process
+       ;; wait for output, process, and remove filter:
+       (lambda (process output)
+         (string-match "^ANS_TIME_POSITION=\\(.*\\)$" output)
+         (setq time (match-string 1 output))
+         (set-process-filter mplayer-process nil)))
+      ;; Then send the command:
+      (mplayer--send "get_time_pos")
+      (accept-process-output mplayer-process 0.3)
+      time))
+
+(defun mplayer--get-filename ()
+  "Return filename of currently playing file."
+  (let (fn)
+    (set-process-filter
+     mplayer-process
+     (lambda (process output)
+       (string-match "^ANS_path=\\(.*\\)$" output)
+       (setq fn (match-string 1 output))
+       (set-process-filter mplayer-process nil)))
+    (mplayer--send "get_property path")
+    (accept-process-output mplayer-process 0.3)
+    (if (file-exists-p fn)
+        (if (string-match "\\.\\./" (file-relative-name fn)) ;if file is above current dir
+            fn
+          (file-relative-name fn))
+      nil)))
+
+(defun mplayer--get-speed ()
+  "Return current playback speed"
+  (let (speed)
+    (set-process-filter
+     mplayer-process
+     (lambda (process output)
+       (string-match "^ANS_speed=\\(.*\\)$" output)
+       (setq speed (match-string 1 output))
+       (set-process-filter mplayer-process nil)))
+    (mplayer--send "get_property speed")
+    (accept-process-output mplayer-process 0.3)
+    (if (= 0 (string-to-number (if (stringp speed) speed "0")))
+        nil
+      speed)))
+
+
 ;;; Interactive Commands:
+(defun mplayer-session-resume ()
+  "Resumes a transcription session (entering mplayer-mode) with the options given by the file local variables `mplayer-file', `mplayer-position', and `mplayer-playback-speed'"
+  (interactive)
+  (when (file-readable-p mplayer-file)
+    (mplayer-find-file mplayer-file)
+    (if (numberp mplayer-position)
+        (mplayer-seek-position (- mplayer-position mplayer-resume-rewind))
+      (message "Can't reset to previous position"))
+    (if (numberp mplayer-playback-speed)
+        (mplayer--send (format "speed_set %s" mplayer-playback-speed))
+      (message "Can't set playback speed to previous value.")
+        )
+
+
+    ))
+
 
 (defun mplayer-find-file (filename)
   "Entry point to this mode.  Starts playing the file using
@@ -190,39 +266,21 @@ for the type of display."
 buffer.  See `mplayer-timestamp-format' for the insertion
 format."
   (interactive)
-  (let (time)
-    (set-process-filter
-     mplayer-process
-     ;; wait for output, process, and remove filter:
-     (lambda (process output)
-       (message "process: %s output: %s" process output)
-       (string-match "^ANS_TIME_POSITION=\\(.*\\)$" output)
-       (setq time (match-string 1 output))
-       (if time
-           (insert (mplayer--format-time time))
-         (message "MPlayer: couldn't detect current time."))
-       (set-process-filter mplayer-process nil)))
-    ;; Then send the command:
-    (mplayer--send "get_time_pos")))
+  (let ((time (mplayer--get-time)))
+    (if time
+        (insert (mplayer--format-time time))
+      (message "MPlayer: couldn't detect current time."))))
+
 
 (defun mplayer-insert-position ()
   "Insert the current recording position in seconds,
 into the buffer."
   (interactive)
-  (let (time)
-    (set-process-filter
-     mplayer-process
-     ;; wait for output, process, and remove filter:
-     (lambda (process output)
-       (message "process: %s output: %s" process output)
-       (string-match "^ANS_TIME_POSITION=\\(.*\\)$" output)
-       (setq time (match-string 1 output))
-       (if time
-           (insert time)
-         (message "MPlayer: couldn't detect current time."))
-       (set-process-filter mplayer-process nil)))
-    ;; Then send the command:
-    (mplayer--send "get_time_pos")))
+        (let ((time (mplayer--get-time)))
+    (if time
+        (insert time)
+      (message "MPlayer: couldn't detect current time."))))
+
 
 (defun mplayer-seek-position (position)
   "Seek to some place in the recording."
@@ -234,6 +292,27 @@ into the buffer."
 (defun mplayer-quit-mplayer ()
   "Quit mplayer and exit this mode."
   (interactive)
+  (let ((save t) (already-session
+                  (if file-local-variables-alist
+                      (if (assoc 'mplayer-file file-local-variables-alist)
+                          t
+                        nil)
+                    nil)))
+    (unless already-session (setq save (y-or-n-p "Save session as file-local variables?")))
+    (when save
+      (let ((file (mplayer--get-filename))
+            (time (mplayer--get-time))
+            (speed (mplayer--get-speed)))
+        (if file
+            (add-file-local-variable-prop-line 'mplayer-file file)
+          (message "Couldn't save filename."))
+        (if time
+            (add-file-local-variable-prop-line 'mplayer-position (string-to-number time))
+          (message "Couldn't save playback position."))
+        (if speed
+            (add-file-local-variable-prop-line 'mplayer-playback-speed (string-to-number speed))
+          (message "Couldn't save playback speed."))
+        (hack-local-variables))))
   (mplayer--send "quit")
   (set-process-filter
    mplayer-process
