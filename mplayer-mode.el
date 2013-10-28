@@ -85,6 +85,11 @@
   :type 'integer
   :group 'mplayer)
 
+(defcustom mplayer-default-play-pause-rewind 1
+  "The number of seconds of rewind applied when using the command `mplayer-toggle-pause-with-rewind'"
+  :type 'integer
+  :group 'mplayer)
+
 (defcustom mplayer-osd-level 3
   "OSD level used by mplayer.  3 (the default) means position/length."
   :type 'integer
@@ -179,6 +184,21 @@ can be an integer or a string."
         nil
       speed)))
 
+(defun mplayer--paused ()
+  "Return pause status: t if paused, nil otherwise"
+  (let (ps)
+    (set-process-filter
+     mplayer-process
+     (lambda (process output)
+       (string-match "^ANS_pause=\\(.*\\)$" output)
+       (setq ps (match-string 1 output))
+       (set-process-filter process nil)))
+    (mplayer--send "pausing_keep_force get_property pause")
+    (accept-process-output mplayer-process 0.3)
+    (if (equal ps "yes")
+        t
+      nil)))
+
 
 ;;; Interactive Commands:
 (defun mplayer-session-resume ()
@@ -216,6 +236,13 @@ documentation for `mplayer-mode' for available bindings."
   "Pause or play the currently-open recording."
   (interactive)
   (mplayer--send "pause"))
+
+(defun mplayer-toggle-pause-with-rewind ()
+  "Pause or play the currently open recording and skip back an amount of `mplayer-default-play-pause-rewind' seconds."
+  (interactive)
+  (if (mplayer--paused)
+      (mplayer--send (format "seek -%d 0" mplayer-default-play-pause-rewind))
+    (mplayer-toggle-pause)))
 
 (defun mplayer-seek-forward (seconds)
   "Skip forward in the recording.  By default this is
@@ -346,6 +373,7 @@ This means brackets etc. can be added to the standard format but not much more"
 (let ((map (make-sparse-keymap)))
   ;; (define-key map (kbd "f")       'mplayer-find-file)
   (define-key map (kbd "SPC")     'mplayer-toggle-pause)
+  (define-key map (kbd "RET")     'mplayer-toggle-pause-with-rewind)
   (define-key map (kbd "<right>") 'mplayer-seek-forward)
   (define-key map (kbd "<left>")  'mplayer-seek-backward)
   (define-key map (kbd "f")       'mplayer-faster)
