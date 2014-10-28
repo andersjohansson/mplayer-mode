@@ -280,10 +280,8 @@ documentation for `mplayer-mode' for available bindings."
   "Pause or play the currently open recording and skip back an amount of `mplayer-default-play-pause-rewind' seconds."
   (interactive)
   (if (mplayer--paused)
-      (progn
-		(mplayer--send (format "seek -%d 0" mplayer-default-play-pause-rewind))
-		(run-at-time 0.2 nil 'mplayer--update-modeline))
-    (mplayer-toggle-pause)))
+      (mplayer--send (format "pausing seek -%d 0" mplayer-default-play-pause-rewind)))
+  (mplayer-toggle-pause))
 
 (defun mplayer-seek-forward (seconds)
   "Skip forward in the recording.  By default this is
