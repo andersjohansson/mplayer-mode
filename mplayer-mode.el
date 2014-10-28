@@ -101,6 +101,21 @@
   :type 'string
   :group 'mplayer)
 
+(defcustom mplayer-display-time-in-modeline t
+  "If the current time and play/pause-status should be displayed in the modeline"
+  :type 'boolean
+  :group 'mplayer)
+
+(defcustom mplayer-modeline-time-format "%H:%M:%S"
+  "Defines the format of the time representation in the modeline."
+  :type 'string
+  :group 'mplayer)
+
+(defvar mplayer-modeline "")
+(put 'mplayer-modeline 'risky-local-variable t)
+
+(defvar mplayer-timer nil)
+
 (defvar mplayer-file "" "File local variable intended to store the media file for mplayer-mode between sessions.")
 ;;;###autoload
 (put 'mplayer-file 'safe-local-variable 'file-readable-p)
@@ -133,15 +148,18 @@
    ((listp speedstep)
     (/ (* mplayer-default-speed-step (+ 1 (log (abs (car speedstep)) 4))) 100.0))))
 
-(defun mplayer--format-time (time)
+(defun mplayer--format-time (time &optional format)
   "Return a formatted time string, using the format string
 `mplayer-timestamp-format'.  The argument is in seconds, and
-can be an integer or a string."
-  (message "format-time: %s" time)
-  (if (stringp time)
-      (setq time (round (string-to-number time))))
-  (message "time to format: %s" time)
-  (format-time-string mplayer-timestamp-format `(0 ,time 0) t))
+can be an integer or a string. Optionally, a format for
+`format-time-string' can be passed."
+  ;(message "format-time: %s" time)
+  (let ((format (or format mplayer-timestamp-format)))
+	  (if (stringp time)
+      (setq time (round (string-to-number time)))
+	(round time))
+  ;(message "time to format: %s" time)
+  (format-time-string format `(0 ,time 0) t)))
 
 (defun mplayer--get-time ()
   "Return time in seconds."
@@ -206,8 +224,25 @@ can be an integer or a string."
 	 ((string= ps "no") nil)
 	 (t 'undef))))
 
+(defun mplayer--update-modeline ()
+  "Update modeline with current position, if modeline display is enabled
+with `mplayer-display-time-in-modeline'."
+  (when mplayer-display-time-in-modeline
+	(let* ((time (mplayer--get-time))
+		   (paused (mplayer--paused))
+		   (ts (if time (mplayer--format-time time mplayer-modeline-time-format) "")))
+	  (setq mplayer-modeline
+			(if mplayer-mode
+				(list "["
+					  (cond (paused "■ ")
+							((not paused) "▶ ")
+							(t ""))
+					  ts "]" )
+			  nil))))
+  (force-mode-line-update))
 
 ;;; Interactive Commands:
+;;;###autoload
 (defun mplayer-session-resume ()
   "Resumes a transcription session (entering mplayer-mode) with the options given by the file local variables `mplayer-file', `mplayer-position', and `mplayer-playback-speed'"
   (interactive)
@@ -238,13 +273,16 @@ documentation for `mplayer-mode' for available bindings."
 (defun mplayer-toggle-pause ()
   "Pause or play the currently-open recording."
   (interactive)
-  (mplayer--send "pause"))
+  (mplayer--send "pause")
+  (run-at-time 0.2 nil 'mplayer--update-modeline))
 
 (defun mplayer-toggle-pause-with-rewind ()
   "Pause or play the currently open recording and skip back an amount of `mplayer-default-play-pause-rewind' seconds."
   (interactive)
   (if (mplayer--paused)
-      (mplayer--send (format "seek -%d 0" mplayer-default-play-pause-rewind))
+      (progn
+		(mplayer--send (format "seek -%d 0" mplayer-default-play-pause-rewind))
+		(run-at-time 0.2 nil 'mplayer--update-modeline))
     (mplayer-toggle-pause)))
 
 (defun mplayer-seek-forward (seconds)
@@ -254,7 +292,8 @@ a numeric prefix arg, or plain prefix args act as a
 successive (linear) multipliers of `mplayer-default-seek-step'."
   (interactive "P")
   (let ((seconds (mplayer--parse-seconds seconds)))
-    (mplayer--send (format "seek %d 0" seconds))))
+    (mplayer--send (format "seek %d 0" seconds)))
+  (run-at-time 0.2 nil 'mplayer--update-modeline))
 
 (defun mplayer-seek-backward (seconds)
   "Skip backward in the recording.  By default this is
@@ -263,7 +302,8 @@ a numeric prefix arg, or plain prefix args act as a
 successive (linear) multipliers of `mplayer-default-seek-step'."
   (interactive "P")
   (let ((seconds (- (mplayer--parse-seconds seconds))))
-    (mplayer--send (format "seek %d 0" seconds))))
+    (mplayer--send (format "seek %d 0" seconds)))
+  (run-at-time 0.2 nil 'mplayer--update-modeline))
 
 (defun mplayer-faster (speedstep)
   "Increase playback speed. By default by `mplayer-default-speed-step' percentage points; it can also be set with a numeric prefix arg, or plain prefix args acts as successive multipliers (2,3,4...) of `mplayer-default-speed-step'"
@@ -317,7 +357,8 @@ into the buffer."
   ;; (interactive "P")
   (interactive "nEnter seek position: ")
   ;; (message "Seeking to position: %n" position)
-    (mplayer--send (format "seek %d 2" position)))
+  (mplayer--send (format "seek %d 2" position))
+  (mplayer--update-modeline))
 
 (defun mplayer-seek-timestamp ()
   "Seek to the time specified by the closest (backwards) timestamp. This requires timestamps to contain a string like %H:%M:%S.
@@ -403,6 +444,20 @@ Key bindings:
 \\{mplayer-mode-map}"
   nil                                   ; initial value
   " MPlayer"                            ; mode-line string
-  mplayer-mode-map)
+  mplayer-mode-map
+  (when mplayer-display-time-in-modeline ; assume it is not changed
+										; when in mplayer-mode
+	(if mplayer-mode
+		(progn
+		  (unless global-mode-string (setq global-mode-string '("")))
+		  (unless (memq 'mplayer-modeline global-mode-string)
+			(setq global-mode-string (append global-mode-string
+											 '(mplayer-modeline))))
+		  (setq mplayer-timer (run-with-timer 2 3 'mplayer--update-modeline)))
+	  (progn
+		(cancel-timer mplayer-timer)
+		(when (and (listp global-mode-string) (memq 'mplayer-modeline global-mode-string))
+		  (setq global-mode-string (delq 'mplayer-modeline global-mode-string))
+		  (force-mode-line-update))))))
 
 (provide 'mplayer-mode)
