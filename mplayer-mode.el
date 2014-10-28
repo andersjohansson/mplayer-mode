@@ -89,6 +89,7 @@
   "The number of seconds of rewind applied when using the command `mplayer-toggle-pause-with-rewind'"
   :type 'integer
   :group 'mplayer)
+(put 'mplayer-default-play-pause-rewind 'safe-local-variable 'integerp)
 
 (defcustom mplayer-osd-level 3
   "OSD level used by mplayer.  3 (the default) means position/length."
@@ -101,10 +102,15 @@
   :group 'mplayer)
 
 (defvar mplayer-file "" "File local variable intended to store the media file for mplayer-mode between sessions.")
+;;;###autoload
 (put 'mplayer-file 'safe-local-variable 'file-readable-p)
+;;;###autoload
 (defvar mplayer-position 0 "File local variable intended to store the position in `mplayer-file' between sessions.")
+;;;###autoload
 (put 'mplayer-position 'safe-local-variable 'numberp)
+;;;###autoload
 (defvar mplayer-playback-speed 1 "File local variable intended to store the playback speed of `mplayer-file' between sessions.")
+;;;###autoload
 (put 'mplayer-playback-speed 'safe-local-variable 'numberp)
 
 
@@ -144,8 +150,8 @@ can be an integer or a string."
        mplayer-process
        ;; wait for output, process, and remove filter:
        (lambda (process output)
-         (string-match "^ANS_TIME_POSITION=\\(.*\\)$" output)
-         (setq time (match-string 1 output))
+         (when (string-match "^ANS_TIME_POSITION=\\(.*\\)$" output)
+		   (setq time (match-string 1 output)))
          (set-process-filter process nil)))
       ;; Then send the command:
       (mplayer--send "pausing_keep_force get_time_pos")
@@ -158,8 +164,8 @@ can be an integer or a string."
     (set-process-filter
      mplayer-process
      (lambda (process output)
-       (string-match "^ANS_path=\\(.*\\)$" output)
-       (setq fn (match-string 1 output))
+       (when (string-match "^ANS_path=\\(.*\\)$" output)
+		 (setq fn (match-string 1 output)))
        (set-process-filter process nil)))
     (mplayer--send "pausing_keep_force get_property path")
     (accept-process-output mplayer-process 0.3)
@@ -175,8 +181,8 @@ can be an integer or a string."
     (set-process-filter
      mplayer-process
      (lambda (process output)
-       (string-match "^ANS_speed=\\(.*\\)$" output)
-       (setq speed (match-string 1 output))
+       (when (string-match "^ANS_speed=\\(.*\\)$" output)
+		 (setq speed (match-string 1 output)))
        (set-process-filter process nil)))
     (mplayer--send "pausing_keep_force get_property speed")
     (accept-process-output mplayer-process 0.3)
@@ -185,19 +191,20 @@ can be an integer or a string."
       speed)))
 
 (defun mplayer--paused ()
-  "Return pause status: t if paused, nil otherwise"
+  "Return pause status: t if paused, nil if not, undef if there was an error."
   (let (ps)
     (set-process-filter
      mplayer-process
      (lambda (process output)
-       (string-match "^ANS_pause=\\(.*\\)$" output)
-       (setq ps (match-string 1 output))
+       (when (string-match "^ANS_pause=\\(.*\\)$" output)
+		 (setq ps (match-string 1 output)))
        (set-process-filter process nil)))
     (mplayer--send "pausing_keep_force get_property pause")
     (accept-process-output mplayer-process 0.3)
-    (if (equal ps "yes")
-        t
-      nil)))
+    (cond
+	 ((string= ps "yes") t)
+	 ((string= ps "no") nil)
+	 (t 'undef))))
 
 
 ;;; Interactive Commands:
@@ -211,13 +218,9 @@ can be an integer or a string."
       (message "Can't reset to previous position"))
     (if (numberp mplayer-playback-speed)
         (mplayer--send (format "speed_set %s" mplayer-playback-speed))
-      (message "Can't set playback speed to previous value.")
-        )
+      (message "Can't set playback speed to previous value."))))
 
-
-    ))
-
-
+;;;###autoload
 (defun mplayer-find-file (filename)
   "Entry point to this mode.  Starts playing the file using
 mplayer, and enables some keybindings to support it; see the
@@ -228,9 +231,9 @@ documentation for `mplayer-mode' for available bindings."
   (set (make-local-variable 'mplayer-process)
        (start-process "mplayer" mplayer-process-buffer
                       mplayer-executable
-                      "-quiet" "-slave"
+					  "-af" "scaletempo" "-quiet" "-slave"
                       filename))
-  (mplayer-mode t))
+  (mplayer-mode))
 
 (defun mplayer-toggle-pause ()
   "Pause or play the currently-open recording."
@@ -337,33 +340,34 @@ This means brackets etc. can be added to the standard format but not much more"
 (defun mplayer-quit-mplayer ()
   "Quit mplayer and exit this mode."
   (interactive)
-  (let ((save t) (already-session
-                  (if file-local-variables-alist
-                      (if (assoc 'mplayer-file file-local-variables-alist)
-                          t
-                        nil)
-                    nil)))
-    (unless already-session (setq save (y-or-n-p "Save session as file-local variables?")))
-    (when save
-      (let ((file (mplayer--get-filename))
-            (time (mplayer--get-time))
-            (speed (mplayer--get-speed)))
-        (if file
-            (add-file-local-variable 'mplayer-file file)
-          (message "Couldn't save filename."))
-        (if time
-            (add-file-local-variable 'mplayer-position (string-to-number time))
-          (message "Couldn't save playback position."))
-        (if speed
-            (add-file-local-variable 'mplayer-playback-speed (string-to-number speed))
-          (message "Couldn't save playback speed."))
-        (hack-local-variables))))
+  (save-excursion
+	(let ((save t) (already-session
+					(if file-local-variables-alist
+						(if (assoc 'mplayer-file file-local-variables-alist)
+							t
+						  nil)
+					  nil)))
+	  (unless already-session (setq save (y-or-n-p "Save session as file-local variables?")))
+	  (when save
+		(let ((file (mplayer--get-filename))
+			  (time (mplayer--get-time))
+			  (speed (mplayer--get-speed)))
+		  (if file
+			  (add-file-local-variable 'mplayer-file file)
+			(message "Couldn't save filename."))
+		  (if time
+			  (add-file-local-variable 'mplayer-position (string-to-number time))
+			(message "Couldn't save playback position."))
+		  (if speed
+			  (add-file-local-variable 'mplayer-playback-speed (string-to-number speed))
+			(message "Couldn't save playback speed."))
+		  (hack-local-variables)))))
   (mplayer--send "quit")
   (set-process-filter
    mplayer-process
    (lambda (process output)
      (kill-buffer mplayer-process-buffer)))
-  (mplayer-mode nil))
+  (mplayer-mode -1))
 
 ;;; Mode setup:
 
