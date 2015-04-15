@@ -51,7 +51,8 @@
 ;;; Code:
 
 (defgroup mplayer nil
-  "Group used to store various mplayer-mode variables.")
+  "Group used to store various mplayer-mode variables."
+  :group 'multimedia)
 
 
 (defcustom mplayer-executable "mplayer"
@@ -62,9 +63,9 @@
 (defvar mplayer-mode-map nil
   "Local keymap for mplayer-mode")
 
-;;; This prefix is chosen for ergonomic accessibility; it does ignore
-;;; the recomendations about C-x being for global combinations, etc,
-;;; so change if it's inconvenient.
+;; This prefix is chosen for ergonomic accessibility; it does ignore
+;; the recomendations about C-x being for global combinations, etc,
+;; so change if it's inconvenient.
 (defcustom mplayer-prefix-command "\C-x "
   "The prefix for all mplayer minor-mode commands. Default C-x SPC."
   :type 'key-sequence
@@ -111,6 +112,11 @@
   :type 'string
   :group 'mplayer)
 
+;;; Internal variables
+(defvar mplayer--osd-enabled nil)
+(defvar mplayer-process nil)
+(defvar mplayer-process-buffer nil)
+
 (defvar mplayer-modeline "")
 (put 'mplayer-modeline 'risky-local-variable t)
 
@@ -153,13 +159,14 @@
 `mplayer-timestamp-format'.  The argument is in seconds, and
 can be an integer or a string. Optionally, a format for
 `format-time-string' can be passed."
-  ;(message "format-time: %s" time)
+  ;;(message "format-time: %s" time)
   (let ((format (or format mplayer-timestamp-format)))
-	  (if (stringp time)
-      (setq time (round (string-to-number time)))
-	(round time))
-  ;(message "time to format: %s" time)
-  (format-time-string format `(0 ,time 0) t)))
+    (setq time
+          (if (stringp time)
+              (round (string-to-number time))
+            (round time)))
+    ;;(message "time to format: %s" time)
+    (format-time-string format `(0 ,time 0) t)))
 
 (defun mplayer--get-time ()
   "Return time in seconds."
