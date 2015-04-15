@@ -112,6 +112,16 @@
   :type 'string
   :group 'mplayer)
 
+(defcustom mplayer-modeline-play-symbol "►"
+  "The symbol used for play in the modeline indication"
+  :type 'string
+  :group 'mplayer)
+
+(defcustom mplayer-modeline-pause-symbol "◼"
+  "The symbol used for play in the modeline indication"
+  :type 'string
+  :group 'mplayer)
+
 ;;; Internal variables
 (defvar mplayer--osd-enabled nil)
 (defvar mplayer-process nil)
@@ -234,18 +244,19 @@ can be an integer or a string. Optionally, a format for
 (defun mplayer--update-modeline ()
   "Update modeline with current position, if modeline display is enabled
 with `mplayer-display-time-in-modeline'."
-  (when mplayer-display-time-in-modeline
-	(let* ((time (mplayer--get-time))
-		   (paused (mplayer--paused))
-		   (ts (if time (mplayer--format-time time mplayer-modeline-time-format) "")))
-	  (setq mplayer-modeline
-			(if mplayer-mode
-				(list "["
-					  (cond (paused "■ ")
-							((not paused) "▶ ")
-							(t ""))
-					  ts "]" )
-			  nil))))
+  ;; only run if enabled and if we have an active mplayer-process
+  ;; in this buffer
+  (when (and mplayer-display-time-in-modeline mplayer-process)
+	(with-local-quit ;; so C-g works if process hangs
+	  (let* ((time (mplayer--get-time))
+			 (paused (mplayer--paused))
+			 (ts (if time (mplayer--format-time time mplayer-modeline-time-format) "")))
+		(setq mplayer-modeline
+			  (list "["
+                    (cond (paused (concat mplayer-modeline-pause-symbol " "))
+                          ((not paused) (concat mplayer-modeline-play-symbol " "))
+                          (t ""))
+                    ts "]" )))))
   (force-mode-line-update))
 
 ;;; Interactive Commands:
@@ -458,7 +469,7 @@ Key bindings:
 		  (unless (memq 'mplayer-modeline global-mode-string)
 			(setq global-mode-string (append global-mode-string
 											 '(mplayer-modeline))))
-		  (setq mplayer-timer (run-with-timer 2 3 'mplayer--update-modeline)))
+		  (setq mplayer-timer (run-at-time 2 3 'mplayer--update-modeline)))
 	  (progn
 		(cancel-timer mplayer-timer)
 		(when (and (listp global-mode-string) (memq 'mplayer-modeline global-mode-string))
