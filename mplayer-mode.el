@@ -372,13 +372,16 @@ into the buffer."
       (message "MPlayer: couldn't detect current time."))))
 
 
-(defun mplayer-seek-position (position)
-  "Seek to some place in the recording."
-  ;; (interactive "P")
+(defun mplayer-seek-position (position &optional alwaysplay)
+  "Seek to some place in the recording given by seconds in
+POSITION. If the optional ALWAYSPLAY is non-nil resume playback
+if paused."
   (interactive "nEnter seek position: ")
-  ;; (message "Seeking to position: %n" position)
-  (mplayer--send (format "seek %d 2" position))
-  (mplayer--update-modeline))
+  (let ((doplay (and alwaysplay (mplayer--paused 0.1))))
+    (mplayer--send (format "seek %d 2" position))
+    (when doplay ;;resume playback
+      (mplayer--send "pause"))
+    (mplayer--update-modeline)))
 
 (defun mplayer-seek-timestamp ()
   "Seek to the time specified by the closest (backwards) timestamp. This requires timestamps to contain a string like %H:%M:%S.
