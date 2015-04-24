@@ -178,24 +178,26 @@ can be an integer or a string. Optionally, a format for
     ;;(message "time to format: %s" time)
     (format-time-string format `(0 ,time 0) t)))
 
-(defun mplayer--get-time ()
+(defun mplayer--get-time (&optional wait)
   "Return time in seconds."
-    (let (time)
-      (set-process-filter
-       mplayer-process
-       ;; wait for output, process, and remove filter:
-       (lambda (process output)
-         (when (string-match "^ANS_TIME_POSITION=\\(.*\\)$" output)
-		   (setq time (match-string 1 output)))
-         (set-process-filter process nil)))
-      ;; Then send the command:
-      (mplayer--send "pausing_keep_force get_time_pos")
-      (accept-process-output mplayer-process 0.3)
-      time))
+  (let (time
+        (wait (or wait 0.3)))
+    (set-process-filter
+     mplayer-process
+     ;; wait for output, process, and remove filter:
+     (lambda (process output)
+       (when (string-match "^ANS_TIME_POSITION=\\(.*\\)$" output)
+         (setq time (match-string 1 output)))
+       (set-process-filter process nil)))
+    ;; Then send the command:
+    (mplayer--send "pausing_keep_force get_time_pos")
+    (accept-process-output mplayer-process wait)
+    time))
 
-(defun mplayer--get-filename ()
+(defun mplayer--get-filename (&optional wait)
   "Return filename of currently playing file."
-  (let (fn)
+  (let (fn
+        (wait (or wait 0.3)))
     (set-process-filter
      mplayer-process
      (lambda (process output)
@@ -203,16 +205,17 @@ can be an integer or a string. Optionally, a format for
 		 (setq fn (match-string 1 output)))
        (set-process-filter process nil)))
     (mplayer--send "pausing_keep_force get_property path")
-    (accept-process-output mplayer-process 0.3)
+    (accept-process-output mplayer-process wait)
     (if (file-exists-p fn)
         (if (string-match "\\.\\./" (file-relative-name fn)) ;if file is above current dir
             fn
           (file-relative-name fn))
       nil)))
 
-(defun mplayer--get-speed ()
+(defun mplayer--get-speed (&optional wait)
   "Return current playback speed"
-  (let (speed)
+  (let (speed
+        (wait (or wait 0.3)))
     (set-process-filter
      mplayer-process
      (lambda (process output)
@@ -220,14 +223,15 @@ can be an integer or a string. Optionally, a format for
 		 (setq speed (match-string 1 output)))
        (set-process-filter process nil)))
     (mplayer--send "pausing_keep_force get_property speed")
-    (accept-process-output mplayer-process 0.3)
+    (accept-process-output mplayer-process wait)
     (if (= 0 (string-to-number (if (stringp speed) speed "0")))
         nil
       speed)))
 
-(defun mplayer--paused ()
+(defun mplayer--paused (&optional wait)
   "Return pause status: t if paused, nil if not, undef if there was an error."
-  (let (ps)
+  (let (ps
+        (wait (or wait 0.3)))
     (set-process-filter
      mplayer-process
      (lambda (process output)
@@ -235,7 +239,7 @@ can be an integer or a string. Optionally, a format for
 		 (setq ps (match-string 1 output)))
        (set-process-filter process nil)))
     (mplayer--send "pausing_keep_force get_property pause")
-    (accept-process-output mplayer-process 0.3)
+    (accept-process-output mplayer-process wait)
     (cond
 	 ((string= ps "yes") t)
 	 ((string= ps "no") nil)
@@ -248,8 +252,8 @@ with `mplayer-display-time-in-modeline'."
   ;; in this buffer
   (when (and mplayer-display-time-in-modeline mplayer-process)
 	(with-local-quit ;; so C-g works if process hangs
-	  (let* ((time (mplayer--get-time))
-			 (paused (mplayer--paused))
+	  (let* ((time (mplayer--get-time 0.05))
+			 (paused (mplayer--paused 0.05))
 			 (ts (if time (mplayer--format-time time mplayer-modeline-time-format) "")))
 		(setq mplayer-modeline
 			  (list "["
@@ -362,7 +366,7 @@ format."
   "Insert the current recording position in seconds,
 into the buffer."
   (interactive)
-        (let ((time (mplayer--get-time)))
+  (let ((time (mplayer--get-time)))
     (if time
         (insert time)
       (message "MPlayer: couldn't detect current time."))))
@@ -469,7 +473,7 @@ Key bindings:
 		  (unless (memq 'mplayer-modeline global-mode-string)
 			(setq global-mode-string (append global-mode-string
 											 '(mplayer-modeline))))
-		  (setq mplayer-timer (run-at-time 2 3 'mplayer--update-modeline)))
+		  (setq mplayer-timer (run-at-time 2 1 'mplayer--update-modeline)))
 	  (progn
 		(cancel-timer mplayer-timer)
 		(when (and (listp global-mode-string) (memq 'mplayer-modeline global-mode-string))
