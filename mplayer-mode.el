@@ -122,6 +122,12 @@
   :type 'string
   :group 'mplayer)
 
+(defcustom mplayer-try-org-properties-for-sessions t
+  "Whether org mode properties should be used to store session
+variables (filename, position, playback speed)"
+  :type 'boolean
+  :group 'mplayer)
+
 ;;; Internal variables
 (defvar mplayer--osd-enabled nil)
 (defvar mplayer--process nil)
@@ -263,17 +269,30 @@ with `mplayer-display-time-in-modeline'."
 
 ;;; Interactive Commands:
 ;;;###autoload
-(defun mplayer-session-resume ()
+(defun mplayer-resume-session ()
   "Resumes a transcription session (entering mplayer-mode) with the options given by the file local variables `mplayer-file', `mplayer-position', and `mplayer-playback-speed'"
   (interactive)
-  (when (file-readable-p mplayer-file)
-    (mplayer-find-file mplayer-file)
-    (if (numberp mplayer-position)
-        (mplayer-seek-position (- mplayer-position mplayer-resume-rewind))
-      (message "Can't reset to previous position"))
-    (if (numberp mplayer-playback-speed)
-        (mplayer--send (format "speed_set %s" mplayer-playback-speed))
-      (message "Can't set playback speed to previous value."))))
+  (let ((file (or (and mplayer-try-org-properties-for-sessions
+                       (org-entry-get-with-inheritance "mplayer-file"))
+                  mplayer-file))
+        (position (or (and mplayer-try-org-properties-for-sessions
+                           (string-to-number
+                            (org-entry-get-with-inheritance "mplayer-position")))
+                      mplayer-position))
+        (playback-speed (or (and mplayer-try-org-properties-for-sessions
+                                 (string-to-number
+                                  (org-entry-get-with-inheritance "mplayer-playback-speed")))
+                            (mplayer-playback-speed))))
+    (if (file-readable-p file)
+        (progn
+          (mplayer-find-file file)
+          (if (numberp position)
+              (mplayer-seek-position (- position mplayer-resume-rewind))
+            (message "Can't reset to previous position: %s" position))
+          (if (numberp playback-speed)
+              (mplayer--send (format "speed_set %s" playback-speed))
+            (message "Can't set playback speed to previous value: %" playback-speed)))
+      (message "Cant't resume mplayer session, unreadable file: %s" file))))
 
 ;;;###autoload
 (defun mplayer-find-file (filename)
@@ -400,36 +419,71 @@ This means brackets etc. can be added to the standard format but not much more"
     (message "Timestamp format does not contain %%H:%%M:%%S")))
 
 (defun mplayer-quit-mplayer ()
-  "Quit mplayer and exit this mode."
+  "Quit mplayer and exit `mplayer-mode', possibly saving the mplayer session."
   (interactive)
-  (save-excursion
-	(let ((save t) (already-session
-					(if file-local-variables-alist
-						(if (assoc 'mplayer-file file-local-variables-alist)
-							t
-						  nil)
-					  nil)))
-	  (unless already-session (setq save (y-or-n-p "Save session as file-local variables?")))
-	  (when save
-		(let ((file (mplayer--get-filename))
-			  (time (mplayer--get-time))
-			  (speed (mplayer--get-speed)))
-		  (if file
-			  (add-file-local-variable 'mplayer-file file)
-			(message "Couldn't save filename."))
-		  (if time
-			  (add-file-local-variable 'mplayer-position (string-to-number time))
-			(message "Couldn't save playback position."))
-		  (if speed
-			  (add-file-local-variable 'mplayer-playback-speed (string-to-number speed))
-			(message "Couldn't save playback speed."))
-		  (hack-local-variables)))))
-  (mplayer--send "quit")
-  (set-process-filter
-   mplayer--process
-   (lambda (process output)
-     (kill-buffer mplayer--process-buffer)))
-  (mplayer-mode -1))
+  (let* (org-pom
+         (save-fn
+          (or (when (and mplayer-try-org-properties-for-sessions
+                         (org-entry-get-with-inheritance "mplayer-file"))
+                (setq org-pom org-entry-property-inherited-from)
+                (lambda (symb val) (org-entry-put org-pom (symbol-name symb) val)))
+              (when (and file-local-variables-alist
+                         (assoc 'mplayer-file file-local-variables-alist))
+                #'add-file-local-variable)
+              ;; ask for how to save
+              (cond ((and mplayer-try-org-properties-for-sessions
+                          (y-or-n-p "Save session in org properties?"))
+                     (setq org-pom (mplayer--org-get-outline-path))
+                     (lambda (symb val) (org-entry-put org-pom (symbol-name symb) val)))
+                    ((y-or-n-p "Save session as file-local variables?")
+                     #'add-file-local-variable)
+                    (t nil)))))
+    (when save-fn
+      (let ((save-list `((mplayer-file ,(mplayer--get-filename) 
+                                       "Couldn't save filename")
+                         (mplayer-position ,(mplayer--get-time)
+                                           "Couldn't save playback position")
+                         (mplayer-playback-speed ,(mplayer--get-speed)
+                                                 "Couldn't save playback speed"))))
+        (dolist (x save-list)
+          (if (cadr x)
+              (progn (apply save-fn (butlast x)))
+            (message (car (last x))))))
+      ;; (when (eq already-session 'file-local)
+      ;;   (hack-local-variables))
+      )
+    
+    (mplayer--send "quit")
+    (set-process-filter
+     mplayer--process
+     (lambda (process output)
+       (kill-buffer mplayer--process-buffer)))
+    (mplayer-mode -1)))
+
+(defun mplayer--org-get-outline-path ()
+  "Return the outline path to the current entry, as an alist with the
+ cdr's the markers for the positions of each headline."
+  (let (hlist case-fold-search)
+    (save-excursion
+      (save-restriction
+        (widen)
+        (push (progn (org-back-to-heading) (cons (org-get-heading) (point)))
+              hlist)
+        (while (org-up-heading-safe)
+          (when (looking-at org-complex-heading-regexp)
+            (push (cons
+                   (org-trim
+                    (replace-regexp-in-string
+                     ;; Remove statistical/checkboxes cookies
+                     "\\[[0-9]+%\\]\\|\\[[0-9]+/[0-9]+\\]" ""
+                     (org-match-string-no-properties 4)))
+                   (point))
+                  hlist)))
+        ;;(push (cons "FILE PROPERTY" 'file-property) hlist)
+        ))
+    (let* ((keylist (mapcar 'car hlist))
+           (heading (completing-read "Heading to file under: " keylist nil t)))
+      (cdr (assoc heading hlist)))))
 
 ;;; Mode setup:
 
