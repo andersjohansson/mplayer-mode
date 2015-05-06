@@ -4,6 +4,7 @@
 
 ;; Author: Mark Hepburn (mark.hepburn@gmail.com)
 ;; Compatibility: Emacs20, Emacs21, Emacs22, Emacs23
+;; Keywords: multimedia
 
 ;; This file is not part of GNU Emacs.
 
@@ -148,124 +149,6 @@ variables (filename, position, playback speed)"
 ;;;###autoload
 (put 'mplayer-playback-speed 'safe-local-variable 'numberp)
 
-
-;;; Utilities:
-
-(defun mplayer--send (cmd)
-  (process-send-string mplayer--process (concat cmd "\n")))
-
-(defun mplayer--parse-seconds (seconds)
-  (cond
-   ((null seconds) mplayer-default-seek-step)
-   ((numberp seconds) seconds)
-   ((listp seconds)
-    (* mplayer-default-seek-step (log (abs (car seconds)) 4)))))
-
-(defun mplayer--parse-speedstep (speedstep)
-  (cond
-   ((null speedstep) (/ mplayer-default-speed-step 100.0))
-   ((numberp speedstep) (/ speedstep 100.0))
-   ((listp speedstep)
-    (/ (* mplayer-default-speed-step (+ 1 (log (abs (car speedstep)) 4))) 100.0))))
-
-(defun mplayer--format-time (time &optional format)
-  "Return a formatted time string, using the format string
-`mplayer-timestamp-format'.  The argument is in seconds, and
-can be an integer or a string. Optionally, a format for
-`format-time-string' can be passed."
-  ;;(message "format-time: %s" time)
-  (let ((format (or format mplayer-timestamp-format)))
-    (setq time
-          (if (stringp time)
-              (round (string-to-number time))
-            (round time)))
-    ;;(message "time to format: %s" time)
-    (format-time-string format `(0 ,time 0) t)))
-
-(defun mplayer--get-time (&optional wait)
-  "Return time in seconds."
-  (let (time
-        (wait (or wait 0.3)))
-    (set-process-filter
-     mplayer--process
-     ;; wait for output, process, and remove filter:
-     (lambda (process output)
-       (when (string-match "^ANS_TIME_POSITION=\\(.*\\)$" output)
-         (setq time (match-string 1 output)))
-       (set-process-filter process nil)))
-    ;; Then send the command:
-    (mplayer--send "pausing_keep_force get_time_pos")
-    (accept-process-output mplayer--process wait)
-    time))
-
-(defun mplayer--get-filename (&optional wait)
-  "Return filename of currently playing file."
-  (let (fn
-        (wait (or wait 0.3)))
-    (set-process-filter
-     mplayer--process
-     (lambda (process output)
-       (when (string-match "^ANS_path=\\(.*\\)$" output)
-		 (setq fn (match-string 1 output)))
-       (set-process-filter process nil)))
-    (mplayer--send "pausing_keep_force get_property path")
-    (accept-process-output mplayer--process wait)
-    (if (file-exists-p fn)
-        (if (string-match "\\.\\./" (file-relative-name fn)) ;if file is above current dir
-            fn
-          (file-relative-name fn))
-      nil)))
-
-(defun mplayer--get-speed (&optional wait)
-  "Return current playback speed"
-  (let (speed
-        (wait (or wait 0.3)))
-    (set-process-filter
-     mplayer--process
-     (lambda (process output)
-       (when (string-match "^ANS_speed=\\(.*\\)$" output)
-		 (setq speed (match-string 1 output)))
-       (set-process-filter process nil)))
-    (mplayer--send "pausing_keep_force get_property speed")
-    (accept-process-output mplayer--process wait)
-    (if (= 0 (string-to-number (if (stringp speed) speed "0")))
-        nil
-      speed)))
-
-(defun mplayer--paused (&optional wait)
-  "Return pause status: t if paused, nil if not, undef if there was an error."
-  (let (ps
-        (wait (or wait 0.3)))
-    (set-process-filter
-     mplayer--process
-     (lambda (process output)
-       (when (string-match "^ANS_pause=\\(.*\\)$" output)
-		 (setq ps (match-string 1 output)))
-       (set-process-filter process nil)))
-    (mplayer--send "pausing_keep_force get_property pause")
-    (accept-process-output mplayer--process wait)
-    (cond
-	 ((string= ps "yes") t)
-	 ((string= ps "no") nil)
-	 (t 'undef))))
-
-(defun mplayer--update-modeline ()
-  "Update modeline with current position, if modeline display is enabled
-with `mplayer-display-time-in-modeline'."
-  ;; only run if enabled and if we have an active mplayer--process
-  ;; in this buffer
-  (when (and mplayer-display-time-in-modeline mplayer--process)
-	(with-local-quit ;; so C-g works if process hangs
-	  (let* ((time (mplayer--get-time 0.05))
-			 (paused (mplayer--paused 0.05))
-			 (ts (if time (mplayer--format-time time mplayer-modeline-time-format) "")))
-		(setq mplayer--modeline
-			  (list "["
-                    (cond (paused (concat mplayer-modeline-pause-symbol " "))
-                          ((not paused) (concat mplayer-modeline-play-symbol " "))
-                          (t ""))
-                    ts "]" )))))
-  (force-mode-line-update))
 
 ;;; Interactive Commands:
 ;;;###autoload
@@ -462,6 +345,123 @@ much more"
   (mplayer--kill-mplayer-processes) ;;extra cleanup
   (mplayer-mode -1))
 
+;;; Helper functions:
+(defun mplayer--send (cmd)
+  (process-send-string mplayer--process (concat cmd "\n")))
+
+(defun mplayer--parse-seconds (seconds)
+  (cond
+   ((null seconds) mplayer-default-seek-step)
+   ((numberp seconds) seconds)
+   ((listp seconds)
+    (* mplayer-default-seek-step (log (abs (car seconds)) 4)))))
+
+(defun mplayer--parse-speedstep (speedstep)
+  (cond
+   ((null speedstep) (/ mplayer-default-speed-step 100.0))
+   ((numberp speedstep) (/ speedstep 100.0))
+   ((listp speedstep)
+    (/ (* mplayer-default-speed-step (+ 1 (log (abs (car speedstep)) 4))) 100.0))))
+
+(defun mplayer--format-time (time &optional format)
+  "Return a formatted time string, using the format string
+`mplayer-timestamp-format'.  The argument is in seconds, and
+can be an integer or a string. Optionally, a format for
+`format-time-string' can be passed."
+  ;;(message "format-time: %s" time)
+  (let ((format (or format mplayer-timestamp-format)))
+    (setq time
+          (if (stringp time)
+              (round (string-to-number time))
+            (round time)))
+    ;;(message "time to format: %s" time)
+    (format-time-string format `(0 ,time 0) t)))
+
+(defun mplayer--get-time (&optional wait)
+  "Return time in seconds."
+  (let (time
+        (wait (or wait 0.3)))
+    (set-process-filter
+     mplayer--process
+     ;; wait for output, process, and remove filter:
+     (lambda (process output)
+       (when (string-match "^ANS_TIME_POSITION=\\(.*\\)$" output)
+         (setq time (match-string 1 output)))
+       (set-process-filter process nil)))
+    ;; Then send the command:
+    (mplayer--send "pausing_keep_force get_time_pos")
+    (accept-process-output mplayer--process wait)
+    time))
+
+(defun mplayer--get-filename (&optional wait)
+  "Return filename of currently playing file."
+  (let (fn
+        (wait (or wait 0.3)))
+    (set-process-filter
+     mplayer--process
+     (lambda (process output)
+       (when (string-match "^ANS_path=\\(.*\\)$" output)
+		 (setq fn (match-string 1 output)))
+       (set-process-filter process nil)))
+    (mplayer--send "pausing_keep_force get_property path")
+    (accept-process-output mplayer--process wait)
+    (if (file-exists-p fn)
+        (if (string-match "\\.\\./" (file-relative-name fn)) ;if file is above current dir
+            fn
+          (file-relative-name fn))
+      nil)))
+
+(defun mplayer--get-speed (&optional wait)
+  "Return current playback speed"
+  (let (speed
+        (wait (or wait 0.3)))
+    (set-process-filter
+     mplayer--process
+     (lambda (process output)
+       (when (string-match "^ANS_speed=\\(.*\\)$" output)
+		 (setq speed (match-string 1 output)))
+       (set-process-filter process nil)))
+    (mplayer--send "pausing_keep_force get_property speed")
+    (accept-process-output mplayer--process wait)
+    (if (= 0 (string-to-number (if (stringp speed) speed "0")))
+        nil
+      speed)))
+
+(defun mplayer--paused (&optional wait)
+  "Return pause status: t if paused, nil if not, undef if there was an error."
+  (let (ps
+        (wait (or wait 0.3)))
+    (set-process-filter
+     mplayer--process
+     (lambda (process output)
+       (when (string-match "^ANS_pause=\\(.*\\)$" output)
+		 (setq ps (match-string 1 output)))
+       (set-process-filter process nil)))
+    (mplayer--send "pausing_keep_force get_property pause")
+    (accept-process-output mplayer--process wait)
+    (cond
+	 ((string= ps "yes") t)
+	 ((string= ps "no") nil)
+	 (t 'undef))))
+
+(defun mplayer--update-modeline ()
+  "Update modeline with current position, if modeline display is enabled
+with `mplayer-display-time-in-modeline'."
+  ;; only run if enabled and if we have an active mplayer--process
+  ;; in this buffer
+  (when (and mplayer-display-time-in-modeline mplayer--process)
+	(with-local-quit ;; so C-g works if process hangs
+	  (let* ((time (mplayer--get-time 0.05))
+			 (paused (mplayer--paused 0.05))
+			 (ts (if time (mplayer--format-time time mplayer-modeline-time-format) "")))
+		(setq mplayer--modeline
+			  (list "["
+                    (cond (paused (concat mplayer-modeline-pause-symbol " "))
+                          ((not paused) (concat mplayer-modeline-play-symbol " "))
+                          (t ""))
+                    ts "]" )))))
+  (force-mode-line-update))
+
 (defun mplayer--org-get-outline-path ()
   "Return the outline path to the current entry, as an alist with the
  cdr's the markers for the positions of each headline."
@@ -496,8 +496,7 @@ much more"
           (kill-process proc)
           (kill-buffer buf))))))
 
-;;; Mode setup:
-
+;;; Mode setup
 (unless mplayer-mode-map
   (setq mplayer-mode-map (make-sparse-keymap)))
 
@@ -547,3 +546,5 @@ Key bindings:
 		  (force-mode-line-update))))))
 
 (provide 'mplayer-mode)
+
+;;; mplayer-mode.el ends here
