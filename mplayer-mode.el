@@ -401,8 +401,10 @@ if paused."
     (mplayer--update-modeline)))
 
 (defun mplayer-seek-timestamp ()
-  "Seek to the time specified by the closest (backwards) timestamp. This requires timestamps to contain a string like %H:%M:%S.
-This means brackets etc. can be added to the standard format but not much more"
+  "Seek to the time specified by the closest (backwards) timestamp.
+This requires timestamps to contain a string like %H:%M:%S and
+means brackets etc. can be added to the standard format but not
+much more"
   ;;Doing the reverse of format-time-string is very complicated, we
   ;;have to make assumptions
   (interactive)
