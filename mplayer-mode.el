@@ -421,44 +421,44 @@ This means brackets etc. can be added to the standard format but not much more"
 (defun mplayer-quit-mplayer ()
   "Quit mplayer and exit `mplayer-mode', possibly saving the mplayer session."
   (interactive)
-  (let* (org-pom
-         (save-fn
-          (or (when (and mplayer-try-org-properties-for-sessions
-                         (org-entry-get-with-inheritance "mplayer-file"))
-                (setq org-pom org-entry-property-inherited-from)
-                (lambda (symb val) (org-entry-put org-pom (symbol-name symb) val)))
-              (when (and file-local-variables-alist
-                         (assoc 'mplayer-file file-local-variables-alist))
-                #'add-file-local-variable)
-              ;; ask for how to save
-              (cond ((and mplayer-try-org-properties-for-sessions
-                          (y-or-n-p "Save session in org properties?"))
-                     (setq org-pom (mplayer--org-get-outline-path))
-                     (lambda (symb val) (org-entry-put org-pom (symbol-name symb) val)))
-                    ((y-or-n-p "Save session as file-local variables?")
-                     #'add-file-local-variable)
-                    (t nil)))))
-    (when save-fn
-      (let ((save-list `((mplayer-file ,(mplayer--get-filename) 
-                                       "Couldn't save filename")
-                         (mplayer-position ,(mplayer--get-time)
-                                           "Couldn't save playback position")
-                         (mplayer-playback-speed ,(mplayer--get-speed)
-                                                 "Couldn't save playback speed"))))
-        (dolist (x save-list)
-          (if (cadr x)
-              (progn (apply save-fn (butlast x)))
-            (message (car (last x))))))
-      ;; (when (eq already-session 'file-local)
-      ;;   (hack-local-variables))
-      )
-    
-    (mplayer--send "quit")
-    (set-process-filter
-     mplayer--process
-     (lambda (process output)
-       (kill-buffer mplayer--process-buffer)))
-    (mplayer-mode -1)))
+  (when (process-live-p mplayer--process) ;just disable mode otherwise
+    (let* (org-pom
+           (save-fn
+            (or (when (and mplayer-try-org-properties-for-sessions
+                           (org-entry-get-with-inheritance "mplayer-file"))
+                  (setq org-pom org-entry-property-inherited-from)
+                  (lambda (symb val) (org-entry-put org-pom (symbol-name symb) val)))
+                (when (and file-local-variables-alist
+                           (assoc 'mplayer-file file-local-variables-alist))
+                  #'add-file-local-variable)
+                ;; ask for how to save
+                (cond ((and mplayer-try-org-properties-for-sessions
+                            (y-or-n-p "Save session in org properties?"))
+                       (setq org-pom (mplayer--org-get-outline-path))
+                       (lambda (symb val) (org-entry-put org-pom (symbol-name symb) val)))
+                      ((y-or-n-p "Save session as file-local variables?")
+                       #'add-file-local-variable)
+                      (t nil)))))
+      (when save-fn
+        (let ((save-list `((mplayer-file ,(mplayer--get-filename) 
+                                         "Couldn't save filename")
+                           (mplayer-position ,(mplayer--get-time)
+                                             "Couldn't save playback position")
+                           (mplayer-playback-speed ,(mplayer--get-speed)
+                                                   "Couldn't save playback speed"))))
+          (dolist (x save-list)
+            (if (cadr x)
+                (progn (apply save-fn (butlast x)))
+              (message (car (last x))))))
+        ;; (when (eq already-session 'file-local)
+        ;;   (hack-local-variables))
+        )
+      (mplayer--send "quit")
+      (set-process-filter mplayer--process
+                          (lambda (process output)
+                            (kill-buffer mplayer--process-buffer)))))
+  (mplayer--kill-mplayer-processes) ;;extra cleanup
+  (mplayer-mode -1))
 
 (defun mplayer--org-get-outline-path ()
   "Return the outline path to the current entry, as an alist with the
@@ -484,6 +484,15 @@ This means brackets etc. can be added to the standard format but not much more"
     (let* ((keylist (mapcar 'car hlist))
            (heading (completing-read "Heading to file under: " keylist nil t)))
       (cdr (assoc heading hlist)))))
+
+(defun mplayer--kill-mplayer-processes ()
+  (let ((allp (process-list)))
+    (dolist (proc allp)
+      (when (string-match "^mplayer.*" (process-name proc))
+        (let ((buf (process-buffer proc))
+              (kill-buffer-query-functions nil)) ;;workaround really
+          (kill-process proc)
+          (kill-buffer buf))))))
 
 ;;; Mode setup:
 
