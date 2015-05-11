@@ -136,6 +136,9 @@ variables (filename, position, playback speed)"
 (defvar mplayer--modeline "")
 (put 'mplayer--modeline 'risky-local-variable t)
 (defvar mplayer-timer nil)
+(defvar mplayer--current-org-hl-bm-for-props nil)
+(make-variable-buffer-local 'mplayer--current-org-hl-bm-for-props)
+;;; Variables for storing the session
 ;;;###autoload
 (defvar mplayer-file "" "File local variable intended to store the media file for mplayer-mode between sessions.")
 ;;;###autoload
@@ -153,21 +156,34 @@ variables (filename, position, playback speed)"
 ;;; Interactive Commands:
 ;;;###autoload
 (defun mplayer-resume-session ()
-  "Resumes a transcription session (entering mplayer-mode) with the options given by the file local variables `mplayer-file', `mplayer-position', and `mplayer-playback-speed'"
+  "Resumes a transcription session (entering mplayer-mode) with
+the options given by the file local variables `mplayer-file',
+`mplayer-position', and `mplayer-playback-speed' or in org
+properties with the same name if
+`mplayer-try-org-properties-for-sessions' is non-nil and
+properties are found."
   (interactive)
-  (let ((file (or (and mplayer-try-org-properties-for-sessions
-                       (org-entry-get-with-inheritance "mplayer-file"))
-                  mplayer-file))
-        (position (or (and mplayer-try-org-properties-for-sessions
-                           (string-to-number
-                            (org-entry-get-with-inheritance "mplayer-position")))
-                      mplayer-position))
-        (playback-speed (or (and mplayer-try-org-properties-for-sessions
-                                 (string-to-number
-                                  (org-entry-get-with-inheritance "mplayer-playback-speed")))
-                            (mplayer-playback-speed))))
+  (let* (orgprop
+         (file (or (and mplayer-try-org-properties-for-sessions
+                        (setq orgprop (org-entry-get-with-inheritance "mplayer-file")))
+                   mplayer-file))
+         (position (or (and mplayer-try-org-properties-for-sessions
+                            (string-to-number
+                             (org-entry-get-with-inheritance "mplayer-position")))
+                       mplayer-position))
+         (playback-speed (or (and mplayer-try-org-properties-for-sessions
+                                  (string-to-number
+                                   (org-entry-get-with-inheritance "mplayer-playback-speed")))
+                             (mplayer-playback-speed))))
     (if (file-readable-p file)
         (progn
+          (when orgprop
+            (setq mplayer--current-org-hl-bm-for-props
+                  (cons "mplayer--current-org-hl-bm-for-props"
+                        (save-excursion
+                          (save-restriction
+                            (widen) (goto-char org-entry-property-inherited-from)
+                            (bookmark-make-record-default))))))
           (mplayer-find-file file)
           (if (numberp position)
               (mplayer-seek-position (- position mplayer-resume-rewind))
@@ -175,7 +191,7 @@ variables (filename, position, playback speed)"
           (if (numberp playback-speed)
               (mplayer--send (format "speed_set %s" playback-speed))
             (message "Can't set playback speed to previous value: %" playback-speed)))
-      (message "Cant't resume mplayer session, unreadable file: %s" file))))
+      (message "Can't resume mplayer session, unreadable file: %s" file))))
 
 ;;;###autoload
 (defun mplayer-find-file (filename)
@@ -307,45 +323,15 @@ much more"
   "Quit mplayer and exit `mplayer-mode', possibly saving the mplayer session."
   (interactive)
   (when (process-live-p mplayer--process) ;just disable mode otherwise
-    (let* (org-pom
-           (save-fn
-            (or (when (and mplayer-try-org-properties-for-sessions
-                           (org-entry-get-with-inheritance "mplayer-file"))
-                  (setq org-pom org-entry-property-inherited-from)
-                  (lambda (symb val) (org-entry-put org-pom (symbol-name symb) val)))
-                (when (and file-local-variables-alist
-                           (assoc 'mplayer-file file-local-variables-alist))
-                  #'add-file-local-variable)
-                ;; ask for how to save
-                (cond ((and mplayer-try-org-properties-for-sessions
-                            (y-or-n-p "Save session in org properties?"))
-                       (setq org-pom (mplayer--org-get-outline-path))
-                       (lambda (symb val) (org-entry-put org-pom (symbol-name symb) val)))
-                      ((y-or-n-p "Save session as file-local variables?")
-                       #'add-file-local-variable)
-                      (t nil)))))
-      (when save-fn
-        (let ((save-list `((mplayer-file ,(mplayer--get-filename) 
-                                         "Couldn't save filename")
-                           (mplayer-position ,(mplayer--get-time)
-                                             "Couldn't save playback position")
-                           (mplayer-playback-speed ,(mplayer--get-speed)
-                                                   "Couldn't save playback speed"))))
-          (dolist (x save-list)
-            (if (cadr x)
-                (progn (apply save-fn (butlast x)))
-              (message (car (last x))))))
-        ;; (when (eq already-session 'file-local)
-        ;;   (hack-local-variables))
-        )
-      (mplayer--send "quit")
-      (set-process-filter mplayer--process
-                          (lambda (process output)
-                            (kill-buffer mplayer--process-buffer)))))
+    (mplayer--maybe-save-session)
+    (mplayer--send "quit")
+    (set-process-filter mplayer--process
+                        (lambda (process output)
+                          (kill-buffer mplayer--process-buffer))))
   (mplayer--kill-mplayer-processes) ;;extra cleanup
   (mplayer-mode -1))
 
-;;; Helper functions:
+;;; Helper functions
 (defun mplayer--send (cmd)
   (process-send-string mplayer--process (concat cmd "\n")))
 
@@ -462,9 +448,57 @@ with `mplayer-display-time-in-modeline'."
                     ts "]" )))))
   (force-mode-line-update))
 
-(defun mplayer--org-get-outline-path ()
-  "Return the outline path to the current entry, as an alist with the
- cdr's the markers for the positions of each headline."
+(defun mplayer--maybe-save-session ()
+  (let* (org-pom
+         old-file
+         old-bm
+         (current-file (mplayer--get-filename))
+         (save-fn
+          (or (when (and mplayer-try-org-properties-for-sessions
+                         (or (setq old-bm mplayer--current-org-hl-bm-for-props)
+                             (setq old-file (org-entry-get-with-inheritance "mplayer-file"))))
+                (setq org-pom ; this isn't very clean
+                      (cond
+                       (old-bm (save-excursion
+                                 (save-restriction
+                                   (widen)
+                                   (bookmark-default-handler old-bm)
+                                   (setq mplayer--current-org-hl-bm-for-props nil)
+                                   (point)))) ;;TODO, testa här
+                       (old-file
+                        (if (string= old-file current-file)
+                            org-entry-property-inherited-from
+                          (mplayer--org-get-outline-path
+                           "Different file than saved session, choose headline for property: ")))))
+                ;; save-fn as org-entry-put:
+                (lambda (symb val) (org-entry-put org-pom (symbol-name symb) val)))
+              (when (and file-local-variables-alist
+                         (assoc 'mplayer-file file-local-variables-alist))
+                #'add-file-local-variable)
+              ;; ask for how to save
+              (cond ((and mplayer-try-org-properties-for-sessions
+                          (y-or-n-p "Save session in org properties?"))
+                     (setq org-pom (mplayer--org-get-outline-path))
+                     (lambda (symb val) (org-entry-put org-pom (symbol-name symb) val)))
+                    ((y-or-n-p "Save session as file-local variables?")
+                     #'add-file-local-variable)
+                    (t nil)))))
+    (when save-fn
+      (let ((save-list `((mplayer-file ,current-file 
+                                       "Couldn't save filename")
+                         (mplayer-position ,(mplayer--get-time)
+                                           "Couldn't save playback position")
+                         (mplayer-playback-speed ,(mplayer--get-speed)
+                                                 "Couldn't save playback speed"))))
+        (dolist (x save-list)
+          (if (cadr x)
+              (progn (apply save-fn (butlast x)))
+            (message (car (last x)))))))))
+
+(defun mplayer--org-get-outline-path (&optional prompt)
+  "Select the position of a headline in the outline path to the current headline
+
+Optional PROMPT is the prompt for selection "
   (let (hlist case-fold-search)
     (save-excursion
       (save-restriction
@@ -484,7 +518,7 @@ with `mplayer-display-time-in-modeline'."
         ;;(push (cons "FILE PROPERTY" 'file-property) hlist)
         ))
     (let* ((keylist (mapcar 'car hlist))
-           (heading (completing-read "Heading to file under: " keylist nil t)))
+           (heading (completing-read (or prompt "Heading to file under: ") keylist nil t)))
       (cdr (assoc heading hlist)))))
 
 (defun mplayer--kill-mplayer-processes ()
