@@ -168,13 +168,13 @@ properties are found."
                         (setq orgprop (org-entry-get-with-inheritance "mplayer-file")))
                    mplayer-file))
          (position (or (and mplayer-try-org-properties-for-sessions
-                            (string-to-number
-                             (org-entry-get-with-inheritance "mplayer-position")))
+                            (let ((mp (org-entry-get-with-inheritance "mplayer-position")))
+                              (when mp (string-to-number mp))))
                        mplayer-position))
          (playback-speed (or (and mplayer-try-org-properties-for-sessions
-                                  (string-to-number
-                                   (org-entry-get-with-inheritance "mplayer-playback-speed")))
-                             (mplayer-playback-speed))))
+                                  (let ((mps (org-entry-get-with-inheritance "mplayer-playback-speed")))
+                                    (when mps (string-to-number mps))))
+                             mplayer-playback-speed)))
     (if (file-readable-p file)
         (progn
           (when orgprop
@@ -430,6 +430,8 @@ can be an integer or a string. Optionally, a format for
 	 ((string= ps "no") nil)
 	 (t 'undef))))
 
+;;TODO, gör att den inte kollar om "förra" titten var pausad (den körs
+;;automatiskt av toggle play-pause ändå, vad innebär det?)
 (defun mplayer--update-modeline ()
   "Update modeline with current position, if modeline display is enabled
 with `mplayer-display-time-in-modeline'."
@@ -468,7 +470,8 @@ with `mplayer-display-time-in-modeline'."
                        (old-file
                         (if (string= old-file current-file)
                             org-entry-property-inherited-from
-                          (mplayer--org-get-outline-path
+                          (mplayer--org-get-save-heading
+                           'buffer
                            "Different file than saved session, choose headline for property: ")))))
                 ;; save-fn as org-entry-put:
                 (lambda (symb val) (org-entry-put org-pom (symbol-name symb) val)))
@@ -478,7 +481,7 @@ with `mplayer-display-time-in-modeline'."
               ;; ask for how to save
               (cond ((and mplayer-try-org-properties-for-sessions
                           (y-or-n-p "Save session in org properties?"))
-                     (setq org-pom (mplayer--org-get-outline-path))
+                     (setq org-pom (mplayer--org-get-save-heading 'tree))
                      (lambda (symb val) (org-entry-put org-pom (symbol-name symb) val)))
                     ((y-or-n-p "Save session as file-local variables?")
                      #'add-file-local-variable)
@@ -495,28 +498,41 @@ with `mplayer-display-time-in-modeline'."
               (progn (apply save-fn (butlast x)))
             (message (car (last x)))))))))
 
-(defun mplayer--org-get-outline-path (&optional prompt)
-  "Select the position of a headline in the outline path to the current headline
+(defun mplayer--org-get-save-heading (&optional tree-or-buffer prompt)
+  "Select the position of a headline to save properties in.
 
-Optional PROMPT is the prompt for selection "
-  (let (hlist case-fold-search)
+Presents a selection of headings in the outline path to the
+current headline, or among all headings in buffer.
+
+Optional TREE-OR-BUFFER when set to 'buffer means check whole buffer,
+when set to 'tree only the outline path of the current headline and when
+nil asks the user.
+Optional PROMPT is the prompt for selection."
+  (let (hlist
+        case-fold-search
+        (whole-buf (and (not (eq 'tree tree-or-buffer))
+                        (or (eq 'buffer tree-or-buffer)
+                            (y-or-n-p "Select among all headings for saving properties?"))))
+        (list-push
+         '(push (cons (org-trim (replace-regexp-in-string
+                                 ;; Remove statistical/checkboxes cookies
+                                 "\\[[0-9]+%\\]\\|\\[[0-9]+/[0-9]+\\]" ""
+                                 (org-match-string-no-properties 4)))
+                      (point))
+                hlist)))
     (save-excursion
       (save-restriction
         (widen)
-        (push (progn (org-back-to-heading) (cons (org-get-heading) (point)))
-              hlist)
-        (while (org-up-heading-safe)
-          (when (looking-at org-complex-heading-regexp)
-            (push (cons
-                   (org-trim
-                    (replace-regexp-in-string
-                     ;; Remove statistical/checkboxes cookies
-                     "\\[[0-9]+%\\]\\|\\[[0-9]+/[0-9]+\\]" ""
-                     (org-match-string-no-properties 4)))
-                   (point))
-                  hlist)))
-        ;;(push (cons "FILE PROPERTY" 'file-property) hlist)
-        ))
+        (if whole-buf
+            (progn (goto-char (point-min))
+                   (while (re-search-forward org-complex-heading-regexp nil t)
+                     (eval list-push)))
+          (progn
+            (push (progn (org-back-to-heading) (cons (org-get-heading) (point)))
+                  hlist)
+            (while (org-up-heading-safe)
+              (when (looking-at org-complex-heading-regexp)
+                (eval list-push)))))))
     (let* ((keylist (mapcar 'car hlist))
            (heading (completing-read (or prompt "Heading to file under: ") keylist nil t)))
       (cdr (assoc heading hlist)))))
