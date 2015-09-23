@@ -170,11 +170,11 @@ properties are found."
          (position (or (and mplayer-try-org-properties-for-sessions
                             (let ((mp (org-entry-get-with-inheritance "mplayer-position")))
                               (when mp (string-to-number mp))))
-                       mplayer-position))
+                       (string-to-number mplayer-position)))
          (playback-speed (or (and mplayer-try-org-properties-for-sessions
                                   (let ((mps (org-entry-get-with-inheritance "mplayer-playback-speed")))
                                     (when mps (string-to-number mps))))
-                             mplayer-playback-speed)))
+                             (string-to-number mplayer-playback-speed))))
     (if (file-readable-p file)
         (progn
           (when orgprop
@@ -185,10 +185,10 @@ properties are found."
                             (widen) (goto-char org-entry-property-inherited-from)
                             (bookmark-make-record-default))))))
           (mplayer-find-file file)
-          (if (numberp position)
+          (if (not (= 0 position))
               (mplayer-seek-position (- position mplayer-resume-rewind))
             (message "Can't reset to previous position: %s" position))
-          (if (numberp playback-speed)
+          (if (not (= 0 playback-speed))
               (mplayer--send (format "speed_set %s" playback-speed))
             (message "Can't set playback speed to previous value: %s" playback-speed)))
       (message "Can't resume mplayer session, unreadable file: %s" file))))
