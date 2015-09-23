@@ -212,7 +212,7 @@ documentation for `mplayer-mode' for available bindings."
   "Pause or play the currently-open recording."
   (interactive)
   (mplayer--send "pause")
-  (mplayer--update-modeline))
+  (run-at-time 0.2 nil 'mplayer--update-modeline))
 
 (defun mplayer-toggle-pause-with-rewind ()
   "Pause or play the currently open recording and skip back an amount of `mplayer-default-play-pause-rewind' seconds."
@@ -364,19 +364,24 @@ can be an integer or a string. Optionally, a format for
     (format-time-string format `(0 ,time 0) t)))
 
 (defun mplayer--get-time (&optional wait)
-  "Return time in seconds."
+  "Return time in seconds.
+Optional WAIT is the time to wait for output (default 0.3s). If
+WAIT=0 just grab the last time from `mplayer--process-buffer'."
   (let (time
-        (wait (or wait 0.3)))
-    (set-process-filter
-     mplayer--process
-     ;; wait for output, process, and remove filter:
-     (lambda (process output)
-       (when (string-match "^ANS_TIME_POSITION=\\(.*\\)$" output)
-         (setq time (match-string 1 output)))
-       (set-process-filter process nil)))
-    ;; Then send the command:
+        (nofilter (and wait (= 0 wait)))
+        (wait (or wait 0.3))
+        (time-regexp "^ANS_TIME_POSITION=\\(.*\\)$"))
+    (unless nofilter
+      (set-process-filter
+       mplayer--process
+       (lambda (process output)
+         (when (string-match time-regexp output)
+           (setq time (match-string 1 output)))
+         (set-process-filter process nil))))
     (mplayer--send "pausing_keep_force get_time_pos")
-    (accept-process-output mplayer--process wait)
+    (if nofilter
+        (setq time (mplayer--get-previous-output-regexp time-regexp))
+      (accept-process-output mplayer--process wait))
     time))
 
 (defun mplayer--get-filename (&optional wait)
@@ -414,43 +419,60 @@ can be an integer or a string. Optionally, a format for
       speed)))
 
 (defun mplayer--paused (&optional wait)
-  "Return pause status: t if paused, nil if not, undef if there was an error."
+  "Return pause status: t if paused, nil if not, undef if there was an error.
+Optional WAIT is the time to wait for output (default 0.3s). If
+WAIT=0 just grab the last status from `mplayer--process-buffer'."
   (let (ps
-        (wait (or wait 0.3)))
-    (set-process-filter
-     mplayer--process
-     (lambda (process output)
-       (when (string-match "^ANS_pause=\\(.*\\)$" output)
-		 (setq ps (match-string 1 output)))
-       (set-process-filter process nil)))
+        (nofilter (and wait (= 0 wait)))
+        (wait (or wait 0.3))
+        (pause-regexp "^ANS_pause=\\(.*\\)$"))
+    (unless nofilter
+      (set-process-filter
+       mplayer--process
+       (lambda (process output)
+         (when (string-match pause-regexp output)
+           (setq ps (match-string 1 output)))
+         (set-process-filter process nil))))
     (mplayer--send "pausing_keep_force get_property pause")
-    (accept-process-output mplayer--process wait)
+    (if nofilter 
+        (setq ps (mplayer--get-previous-output-regexp pause-regexp))
+      (accept-process-output mplayer--process wait))
     (cond
-	 ((string= ps "yes") t)
-	 ((string= ps "no") nil)
-	 (t 'undef))))
+     ((null ps) 'undef)
+     ((string= ps "yes") t)
+     ((string= ps "no") nil)
+     (t 'undef))))
+
+(defun mplayer--get-previous-output-regexp (regexp)
+  "Search backward and return (match-string 1) for a regexp in the
+last 10 lines in the buffer of `mplayer-process'"
+  (with-current-buffer (process-buffer mplayer--process)
+    (save-excursion
+      (goto-char (point-max))
+      (search-backward-regexp
+       regexp
+       (save-excursion (forward-line -11) (point))
+       t)
+      (match-string 1))))
 
 
-(defvar mplayer--paused nil "Used to keep track of pause status in `mplayer--update-modeline'.")
-(defun mplayer--update-modeline ()
-  "Update modeline with current position, if modeline display is enabled
-with `mplayer-display-time-in-modeline'."
-  ;; only run if enabled and if we have an active mplayer--process
-  ;; in this buffer
+(defun mplayer--update-modeline (&optional wait-for-correct)
+  "Update modeline with current position, if modeline display is
+enabled with `mplayer-display-time-in-modeline'. If optional
+WAIT-FOR-CORRECT is non-nil. Make sure we get the current time
+by waiting for process output"
   (when (and mplayer-display-time-in-modeline mplayer--process)
     (with-local-quit ;; so C-g works if process hangs
-      (let ((pausednow (mplayer--paused 0.05)))
-        (unless (and mplayer--paused pausednow) ; don't run if still paused
-          (let* ((time (mplayer--get-time 0.05))
-                 (ts (if time (mplayer--format-time time mplayer-modeline-time-format) "")))
-            (setq mplayer--modeline
-                  (list "["
-                        (cond (pausednow (concat mplayer-modeline-pause-symbol " "))
-                              ((not pausednow) (concat mplayer-modeline-play-symbol " "))
-                              (t ""))
-                        ts "]" )))
-          (force-mode-line-update))
-        (setq mplayer--paused pausednow)))))
+      (let* ((wait-time (if wait-for-correct 3 0))
+             (paused (mplayer--paused wait-time))
+             (time (mplayer--get-time wait-time))
+             (ts (if time (mplayer--format-time time mplayer-modeline-time-format) "")))
+        (setq mplayer--modeline
+              (list "["
+                    (cond (paused (concat mplayer-modeline-pause-symbol " "))
+                          ((not paused) (concat mplayer-modeline-play-symbol " "))
+                          (t ""))
+                    ts "]" ))))))
 
 (defun mplayer--maybe-save-session ()
   (let* (org-pom
@@ -590,9 +612,9 @@ Key bindings:
 		  (unless (memq 'mplayer--modeline global-mode-string)
 			(setq global-mode-string (append global-mode-string
 											 '(mplayer--modeline))))
-		  (setq mplayer-timer (run-with-idle-timer 1 t #'mplayer--update-modeline)))
+          (setq mplayer-timer (run-at-time 5 1 #'mplayer--update-modeline)))
 	  (progn
-		(cancel-timer mplayer-timer)
+        (cancel-timer mplayer-timer)
 		(when (and (listp global-mode-string) (memq 'mplayer--modeline global-mode-string))
 		  (setq global-mode-string (delq 'mplayer--modeline global-mode-string))
 		  (force-mode-line-update))))))
