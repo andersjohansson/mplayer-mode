@@ -190,7 +190,7 @@ properties are found."
             (message "Can't reset to previous position: %s" position))
           (if (numberp playback-speed)
               (mplayer--send (format "speed_set %s" playback-speed))
-            (message "Can't set playback speed to previous value: %" playback-speed)))
+            (message "Can't set playback speed to previous value: %s" playback-speed)))
       (message "Can't resume mplayer session, unreadable file: %s" file))))
 
 ;;;###autoload
@@ -212,7 +212,7 @@ documentation for `mplayer-mode' for available bindings."
   "Pause or play the currently-open recording."
   (interactive)
   (mplayer--send "pause")
-  (run-at-time 0.2 nil 'mplayer--update-modeline))
+  (mplayer--update-modeline))
 
 (defun mplayer-toggle-pause-with-rewind ()
   "Pause or play the currently open recording and skip back an amount of `mplayer-default-play-pause-rewind' seconds."
@@ -409,7 +409,7 @@ can be an integer or a string. Optionally, a format for
        (set-process-filter process nil)))
     (mplayer--send "pausing_keep_force get_property speed")
     (accept-process-output mplayer--process wait)
-    (if (= 0 (string-to-number (if (stringp speed) speed "0")))
+    (if (= 0 (string-to-number (if (stringp speed) speed "0"))) ;TODO, stupid?
         nil
       speed)))
 
@@ -430,25 +430,27 @@ can be an integer or a string. Optionally, a format for
 	 ((string= ps "no") nil)
 	 (t 'undef))))
 
-;;TODO, gör att den inte kollar om "förra" titten var pausad (den körs
-;;automatiskt av toggle play-pause ändå, vad innebär det?)
+
+(defvar mplayer--paused nil "Used to keep track of pause status in `mplayer--update-modeline'.")
 (defun mplayer--update-modeline ()
   "Update modeline with current position, if modeline display is enabled
 with `mplayer-display-time-in-modeline'."
   ;; only run if enabled and if we have an active mplayer--process
   ;; in this buffer
   (when (and mplayer-display-time-in-modeline mplayer--process)
-	(with-local-quit ;; so C-g works if process hangs
-	  (let* ((time (mplayer--get-time 0.05))
-			 (paused (mplayer--paused 0.05))
-			 (ts (if time (mplayer--format-time time mplayer-modeline-time-format) "")))
-		(setq mplayer--modeline
-			  (list "["
-                    (cond (paused (concat mplayer-modeline-pause-symbol " "))
-                          ((not paused) (concat mplayer-modeline-play-symbol " "))
-                          (t ""))
-                    ts "]" )))))
-  (force-mode-line-update))
+    (with-local-quit ;; so C-g works if process hangs
+      (let ((pausednow (mplayer--paused 0.05)))
+        (unless (and mplayer--paused pausednow) ; don't run if still paused
+          (let* ((time (mplayer--get-time 0.05))
+                 (ts (if time (mplayer--format-time time mplayer-modeline-time-format) "")))
+            (setq mplayer--modeline
+                  (list "["
+                        (cond (pausednow (concat mplayer-modeline-pause-symbol " "))
+                              ((not pausednow) (concat mplayer-modeline-play-symbol " "))
+                              (t ""))
+                        ts "]" )))
+          (force-mode-line-update))
+        (setq mplayer--paused pausednow)))))
 
 (defun mplayer--maybe-save-session ()
   (let* (org-pom
@@ -588,7 +590,7 @@ Key bindings:
 		  (unless (memq 'mplayer--modeline global-mode-string)
 			(setq global-mode-string (append global-mode-string
 											 '(mplayer--modeline))))
-		  (setq mplayer-timer (run-at-time 2 1 'mplayer--update-modeline)))
+		  (setq mplayer-timer (run-with-idle-timer 1 t #'mplayer--update-modeline)))
 	  (progn
 		(cancel-timer mplayer-timer)
 		(when (and (listp global-mode-string) (memq 'mplayer--modeline global-mode-string))
