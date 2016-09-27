@@ -138,6 +138,8 @@ variables (filename, position, playback speed)"
 (defvar mplayer-timer nil)
 (defvar mplayer--current-org-hl-bm-for-props nil)
 (make-variable-buffer-local 'mplayer--current-org-hl-bm-for-props)
+
+(defvar mplayer--pause-regexp "^ANS_pause=\\(.*\\)$")
 ;;; Variables for storing the session
 ;;;###autoload
 (defvar mplayer-file "" "File local variable intended to store the media file for mplayer-mode between sessions.")
@@ -424,18 +426,18 @@ Optional WAIT is the time to wait for output (default 0.3s). If
 WAIT=0 just grab the last status from `mplayer--process-buffer'."
   (let (ps
         (nofilter (and wait (= 0 wait)))
-        (wait (or wait 0.3))
-        (pause-regexp "^ANS_pause=\\(.*\\)$"))
+        (wait (or wait 0.3)))
     (unless nofilter
       (set-process-filter
        mplayer--process
        (lambda (process output)
-         (when (string-match pause-regexp output)
+         (when (string-match mplayer--pause-regexp output)
            (setq ps (match-string 1 output)))
          (set-process-filter process nil))))
     (mplayer--send "pausing_keep_force get_property pause")
-    (if nofilter 
-        (setq ps (mplayer--get-previous-output-regexp pause-regexp))
+    (if nofilter
+        (setq ps (mplayer--get-previous-output-regexp
+                  mplayer--pause-regexp))
       (accept-process-output mplayer--process wait))
     (cond
      ((null ps) 'undef)
@@ -485,20 +487,21 @@ by waiting for process output"
                              (setq old-file (org-entry-get-with-inheritance "mplayer-file"))))
                 (setq org-pom ; this isn't very clean
                       (cond
-                       (old-bm (save-excursion
-                                 (save-restriction
-                                   (widen)
-                                   (bookmark-default-handler old-bm)
-                                   (setq mplayer--current-org-hl-bm-for-props nil)
-                                   (point)))) ;;TODO, testa här
-                       (old-file
+                       (old-bm
+                        (save-excursion ; if headline stored in bm, by resume-session
+                          (save-restriction
+                            (widen)
+                            (bookmark-default-handler old-bm)
+                            (setq mplayer--current-org-hl-bm-for-props nil)
+                            (point)))) ;;TODO, testa här
+                       (old-file ; otherwise find it via file property (up the tree)
                         (if (string= old-file current-file)
                             org-entry-property-inherited-from
                           (mplayer--org-get-save-heading
                            'buffer
                            "Different file than saved session, choose headline for property: ")))))
                 ;; save-fn as org-entry-put:
-                (lambda (symb val) (org-entry-put org-pom (symbol-name symb) val)))
+                #'mplayer--save-in-org-prop)
               (when (and file-local-variables-alist
                          (assoc 'mplayer-file file-local-variables-alist))
                 #'add-file-local-variable)
@@ -506,7 +509,7 @@ by waiting for process output"
               (cond ((and mplayer-try-org-properties-for-sessions
                           (y-or-n-p "Save session in org properties?"))
                      (setq org-pom (mplayer--org-get-save-heading 'tree))
-                     (lambda (symb val) (org-entry-put org-pom (symbol-name symb) val)))
+                     #'mplayer--save-in-org-prop)
                     ((y-or-n-p "Save session as file-local variables?")
                      #'add-file-local-variable)
                     (t nil)))))
@@ -521,6 +524,12 @@ by waiting for process output"
           (if (cadr x)
               (progn (apply save-fn (butlast x)))
             (message (car (last x)))))))))
+
+(defun mplayer--save-in-org-prop (symb val)
+  "Function to save session variables SYMB with VAL in org properties,
+expects `org-pom' to be bound to a point or marker of a headline
+where properties should be stored"
+  (org-entry-put org-pom (symbol-name symb) val))
 
 (defun mplayer--org-get-save-heading (&optional tree-or-buffer prompt)
   "Select the position of a headline to save properties in.
