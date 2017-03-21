@@ -158,7 +158,7 @@ variables (filename, position, playback speed)"
 ;;; Interactive Commands:
 ;;;###autoload
 (defun mplayer-resume-session ()
-  "Resumes a transcription session (entering mplayer-mode) with
+  "Resumes a transcription session (entering `mplayer-mode') with
 the options given by the file local variables `mplayer-file',
 `mplayer-position', and `mplayer-playback-speed' or in org
 properties with the same name if
@@ -451,13 +451,12 @@ WAIT=0 just grab the last status from `mplayer--process-buffer'."
 last 10 lines in the buffer of `mplayer-process'"
   (with-current-buffer (process-buffer mplayer--process)
     (save-excursion
-      (goto-char (point-max))
-      (search-backward-regexp
+  (goto-char (point-max))
+  (search-backward-regexp
        regexp
        (save-excursion (forward-line -11) (point))
        t)
       (match-string 1))))
-
 
 (defun mplayer--update-modeline (&optional wait-for-correct)
   "Update modeline with current position, if modeline display is
@@ -466,7 +465,7 @@ WAIT-FOR-CORRECT is non-nil. Make sure we get the current time
 by waiting for process output"
   (when (and mplayer-display-time-in-modeline mplayer--process)
     (with-local-quit ;; so C-g works if process hangs
-      (let* ((wait-time (if wait-for-correct 3 0))
+  (let* ((wait-time (if wait-for-correct 3 0))
              (paused (mplayer--paused wait-time))
              (time (mplayer--get-time wait-time))
              (ts (if time (mplayer--format-time time mplayer-modeline-time-format) "")))
