@@ -187,9 +187,10 @@ properties are found."
                             (widen) (goto-char org-entry-property-inherited-from)
                             (bookmark-make-record-default))))))
           (mplayer-find-file file)
-          (if (not (= 0 position))
-              (mplayer-seek-position (- position mplayer-resume-rewind))
-            (message "Can't reset to previous position: %s" position))
+          (when (not (= 0 position))
+            (ignore-errors ; FIXME, maybe not the best way but we don't want to fail already here.
+              (mplayer-seek-position (- position mplayer-resume-rewind))))
+          ;; (message "Can't reset to previous position: %s" position))
           (if (not (= 0 playback-speed))
               (mplayer--send (format "speed_set %s" playback-speed))
             (message "Can't set playback speed to previous value: %s" playback-speed)))
@@ -296,7 +297,7 @@ POSITION. If the optional ALWAYSPLAY is non-nil resume playback
 if paused."
   (interactive "nEnter seek position: ")
   (let ((doplay (and alwaysplay (mplayer--paused 0.1))))
-    (mplayer--send (format "seek %d 2" position))
+    (mplayer--send (format "seek %d 2" (if (> position 0) position 0)))
     (when doplay ;;resume playback
       (mplayer--send "pause"))
     (mplayer--update-modeline)))
