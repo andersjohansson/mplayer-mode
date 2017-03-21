@@ -207,7 +207,7 @@ documentation for `mplayer-mode' for available bindings."
   (set (make-local-variable 'mplayer--process)
        (start-process "mplayer" mplayer--process-buffer
                       mplayer-executable
-					  "-af" "scaletempo" "-quiet" "-slave"
+					  "-af" "scaletempo" "-quiet" "-slave" "-loop" "0"
                       filename))
   (mplayer-mode))
 
