@@ -331,7 +331,6 @@ much more"
     (set-process-filter mplayer--process
                         (lambda (process output)
                           (kill-buffer mplayer--process-buffer))))
-  (mplayer--kill-mplayer-processes) ;;extra cleanup
   (mplayer-mode -1))
 
 ;;; Helper functions
