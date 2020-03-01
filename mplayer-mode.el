@@ -148,11 +148,11 @@ variables (filename, position, playback speed)"
 ;;;###autoload
 (defvar mplayer-position 0 "File local variable intended to store the position in `mplayer-file' between sessions.")
 ;;;###autoload
-(put 'mplayer-position 'safe-local-variable 'numberp)
+(put 'mplayer-position 'safe-local-variable 'stringp)
 ;;;###autoload
 (defvar mplayer-playback-speed 1 "File local variable intended to store the playback speed of `mplayer-file' between sessions.")
 ;;;###autoload
-(put 'mplayer-playback-speed 'safe-local-variable 'numberp)
+(put 'mplayer-playback-speed 'safe-local-variable 'stringp)
 
 
 ;;; Interactive Commands:
@@ -172,11 +172,11 @@ properties are found."
          (position (or (and mplayer-try-org-properties-for-sessions
                             (let ((mp (org-entry-get-with-inheritance "mplayer-position")))
                               (when mp (string-to-number mp))))
-                       (string-to-number mplayer-position)))
+                       mplayer-position))
          (playback-speed (or (and mplayer-try-org-properties-for-sessions
                                   (let ((mps (org-entry-get-with-inheritance "mplayer-playback-speed")))
                                     (when mps (string-to-number mps))))
-                             (string-to-number mplayer-playback-speed))))
+                             mplayer-playback-speed)))
     (if (file-readable-p file)
         (progn
           (when orgprop
