@@ -5,6 +5,7 @@
 ;; Author: Mark Hepburn (mark.hepburn@gmail.com)
 ;; Compatibility: Emacs20, Emacs21, Emacs22, Emacs23
 ;; Keywords: multimedia
+;; Version: 2.0
 
 ;; This file is not part of GNU Emacs.
 
@@ -50,6 +51,9 @@
 ;; - Error handling and clean-up
 
 ;;; Code:
+
+(require 'bookmark)
+(require 'org)
 
 (defgroup mplayer nil
   "Group used to store various mplayer-mode variables."
@@ -170,12 +174,10 @@ properties are found."
                         (setq orgprop (org-entry-get-with-inheritance "mplayer-file")))
                    mplayer-file))
          (position (or (and mplayer-try-org-properties-for-sessions
-                            (let ((mp (org-entry-get-with-inheritance "mplayer-position")))
-                              (when mp (string-to-number mp))))
+                            (org-entry-get-with-inheritance "mplayer-position"))
                        mplayer-position))
          (playback-speed (or (and mplayer-try-org-properties-for-sessions
-                                  (let ((mps (org-entry-get-with-inheritance "mplayer-playback-speed")))
-                                    (when mps (string-to-number mps))))
+                                  (org-entry-get-with-inheritance "mplayer-playback-speed"))
                              mplayer-playback-speed)))
     (if (file-readable-p file)
         (progn
@@ -187,13 +189,10 @@ properties are found."
                             (widen) (goto-char org-entry-property-inherited-from)
                             (bookmark-make-record-default))))))
           (mplayer-find-file file)
-          (when (not (= 0 position))
-            (ignore-errors ; FIXME, maybe not the best way but we don't want to fail already here.
-              (mplayer-seek-position (- position mplayer-resume-rewind))))
-          ;; (message "Can't reset to previous position: %s" position))
-          (if (not (= 0 playback-speed))
-              (mplayer--send (format "speed_set %s" playback-speed))
-            (message "Can't set playback speed to previous value: %s" playback-speed)))
+          (when position
+            (mplayer-seek-position (- (string-to-number position) mplayer-resume-rewind)))
+          (if playback-speed
+              (mplayer--send (format "speed_set %s" playback-speed))))
       (message "Can't resume mplayer session, unreadable file: %s" file))))
 
 ;;;###autoload
